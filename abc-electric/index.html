@@ -70,6 +70,15 @@
 #nxf .err{display:none;margin-top:14px;padding:12px 14px;border-radius:12px;background:#FDECEA;color:#8A1C12;font-size:15px;font-weight:600}
 #nxf .err.on{display:block}
 
+
+/* talk button */
+#nxf .talk{width:100%;height:60px;margin:0 0 12px;border-radius:16px;border:1.5px solid var(--sel,var(--accent));background:var(--sel-soft,var(--accent-soft));
+  color:var(--sel,var(--accent));font:inherit;font-size:17px;font-weight:800;display:flex;align-items:center;justify-content:center;gap:10px;cursor:pointer;position:relative}
+#nxf .talk svg{width:24px;height:24px}
+#nxf .talk.on{background:var(--sel,var(--accent));color:var(--accent-ink)}
+#nxf .talk.on::after{content:"";position:absolute;inset:-6px;border-radius:20px;border:2px solid var(--sel,var(--accent));opacity:.5;animation:nxpulse 1.4s ease-out infinite}
+@keyframes nxpulse{from{transform:scale(.97);opacity:.6}to{transform:scale(1.04);opacity:0}}
+#nxf .opt{font-weight:500;color:var(--muted);font-size:14px}
 /* send bar */
 #nxf .bar{position:fixed;left:0;right:0;bottom:0;padding:14px 18px calc(14px + env(safe-area-inset-bottom));
   background:linear-gradient(to top,var(--bg) 70%,transparent)}
@@ -115,13 +124,14 @@
     </div>
 
     <div class="card">
-      <div class="f"><label for="nxf-job">Job</label>
+      <div class="f"><label for="nxf-job">Job <span class="opt">(or just say it)</span></label>
         <div class="inp"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg><input id="nxf-job" autocomplete="off" placeholder="Riverside Clinic"></div></div>
       <div class="f"><label for="nxf-name">Your name</label>
         <div class="inp"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg><input id="nxf-name" autocomplete="name" placeholder="Mike"></div></div>
       <div class="f"><label for="nxf-note" id="nxf-note-label">What extra work did you do?</label>
+        <button type="button" class="talk" id="nxf-talk"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg><span id="nxf-talk-label">Tap and talk</span></button>
         <textarea id="nxf-note" placeholder="Dave asked us to move 6 boxes in room 204. 2 guys, 2.5 hours, 40 ft of 12/2."></textarea>
-        <div class="hint"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg><span id="nxf-hint">Tap the microphone on your keyboard to talk instead of type.</span></div></div>
+        <div class="hint"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg><span id="nxf-hint">Say the job, who asked, what you did, how many guys, how long and what material.</span></div></div>
     </div>
     <div class="err" id="nxf-err" role="alert"></div>
   </div>
@@ -175,7 +185,8 @@
 
   $("nxf-send").onclick = function(){
     var job=$("nxf-job").value.trim(), name=$("nxf-name").value.trim(), note=$("nxf-note").value.trim();
-    if(!job||!name||!note){ err(!note ? "Add a few words about the work, then tap Send." : "Fill in the job and your name, then tap Send."); return; }
+    stopTalk();
+    if(!name||!note){ err(!note ? "Tap and talk, or type a few words about the work, then tap Send." : "Add your name, then tap Send."); return; }
     err("");
     try{ localStorage.setItem("nxf_name",name); localStorage.setItem("nxf_job",job); }catch(e){}
     var d = new URLSearchParams(); d.append("job",job); d.append("foreman",name);
@@ -186,6 +197,32 @@
       .catch(function(){ err("Didn't send. Check your signal and tap Send again. Your note is still here."); })
       .then(function(){ btn.disabled=false; btn.className="send"; $("nxf-send-label").textContent="Send"; });
   };
+  /* ---- speech to text ---- */
+  var SR = window.SpeechRecognition || window.webkitSpeechRecognition, rec = null, talking = false, base = "";
+  var talkBtn = $("nxf-talk");
+  function stopTalk(){ if(talking){ talking=false; try{rec.stop();}catch(e){} } talkBtn.className="talk"; $("nxf-talk-label").textContent="Tap and talk"; }
+  if(!SR){
+    $("nxf-talk-label").textContent = "Tap the box, then the mic on your keyboard";
+    talkBtn.onclick = function(){ $("nxf-note").focus(); };
+  } else {
+    talkBtn.onclick = function(){
+      if(talking){ stopTalk(); return; }
+      rec = new SR(); rec.lang = "en-CA"; rec.continuous = true; rec.interimResults = true;
+      base = $("nxf-note").value ? $("nxf-note").value.replace(/\s*$/," ") : "";
+      rec.onresult = function(ev){
+        var fin = "", tmp = "";
+        for(var i=0;i<ev.results.length;i++){ if(ev.results[i].isFinal) fin += ev.results[i][0].transcript; else tmp += ev.results[i][0].transcript; }
+        $("nxf-note").value = base + fin + tmp;
+        if(!ev.results[ev.results.length-1].isFinal) return;
+      };
+      rec.onend = function(){ if(talking){ base = $("nxf-note").value.replace(/\s*$/," "); try{rec.start();}catch(e){ stopTalk(); } } };
+      rec.onerror = function(e){ if(e.error==="not-allowed"||e.error==="service-not-allowed"){ stopTalk(); err("Allow the microphone for this page, or use the mic on your keyboard."); } };
+      try{ rec.start(); talking=true; talkBtn.className="talk on"; $("nxf-talk-label").textContent="Listening... tap to stop"; err(""); }catch(e){ stopTalk(); }
+    };
+  }
+  window.nxfPreviewTalk = function(){ talkBtn.className="talk on"; $("nxf-talk-label").textContent="Listening... tap to stop";
+    $("nxf-note").value="Riverside Clinic. Dave asked us to move six boxes in room 204, two guys two and a half hours, about forty feet of 12/2."; };
+
   $("nxf-again").onclick = function(){ root.className=""; };
 })();
 </script>
